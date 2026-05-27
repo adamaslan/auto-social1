@@ -1,0 +1,50 @@
+# Docs — kept local only
+docs/
+
+# Secrets and credentials — never commit
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.p12
+*.pfx
+sensitive/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+.eggs/
+dist/
+build/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+backend/var/
+
+# Node / Next.js
+node_modules/
+.next/
+.vercel/
+out/
+frontend/.next/
+frontend/node_modules/
+frontend/out/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Claude local settings (permissions only, not secrets, but no need to track)
+.claude/settings.local.json
