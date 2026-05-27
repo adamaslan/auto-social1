@@ -25,8 +25,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import httpx
-
 from .ai_providers import generate_text, provider_status
 from .artifact_store import default_store as artifact_store
 from .config import (
@@ -326,9 +324,8 @@ def _dedupe_stories(stories: list[Story]) -> list[Story]:
 
 async def _fetch_hn_stories() -> list[Story]:
     url = "https://hn.algolia.com/api/v1/search?tags=front_page&query=AI&hitsPerPage=10"
-    async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.get(url)
-        resp.raise_for_status()
+    resp = await ai_client().get(url, timeout=15)
+    resp.raise_for_status()
     hits = resp.json().get("hits", [])
     stories = []
     for hit in hits:
@@ -350,12 +347,11 @@ async def _fetch_arxiv_stories() -> list[Story]:
         "?search_query=cat:cs.AI"
         "&sortBy=submittedDate&sortOrder=descending&max_results=5"
     )
-    async with httpx.AsyncClient(timeout=20) as client:
-        resp = await client.get(url)
-        resp.raise_for_status()
+    resp = await ai_client().get(url, timeout=20)
+    resp.raise_for_status()
 
     try:
-        root = ET.fromstring(resp.text)
+        root = ET.fromstring(resp.content)
     except ET.ParseError as exc:
         raise ValueError(f"Failed to parse arXiv Atom feed: {exc}") from exc
 
@@ -381,9 +377,8 @@ async def _fetch_arxiv_stories() -> list[Story]:
 
 async def _fetch_hf_stories() -> list[Story]:
     url = "https://huggingface.co/api/daily_papers"
-    async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.get(url)
-        resp.raise_for_status()
+    resp = await ai_client().get(url, timeout=15)
+    resp.raise_for_status()
     papers = resp.json() if isinstance(resp.json(), list) else []
     stories = []
     for paper in papers[:5]:
@@ -405,21 +400,21 @@ async def _fetch_hf_stories() -> list[Story]:
 async def _fetch_blog_stories() -> list[Story]:
     """Fetch blog posts from RSS feeds using a proper XML parser."""
     stories = []
-    async with httpx.AsyncClient(timeout=15) as client:
-        for source_name, feed_url in _BLOG_RSS_FEEDS:
-            try:
-                resp = await client.get(feed_url)
-                resp.raise_for_status()
-                stories.extend(_parse_rss_feed(resp.text, source_name))
-            except Exception as exc:
-                record_event("ai_news_blog_feed_error", level="warning", feed=source_name, error=str(exc))
+    client = ai_client()
+    for source_name, feed_url in _BLOG_RSS_FEEDS:
+        try:
+            resp = await client.get(feed_url, timeout=15)
+            resp.raise_for_status()
+            stories.extend(_parse_rss_feed(resp.content, source_name))
+        except Exception as exc:
+            record_event("ai_news_blog_feed_error", level="warning", feed=source_name, error=str(exc))
     return stories
 
 
-def _parse_rss_feed(xml_text: str, source_name: str) -> list[Story]:
+def _parse_rss_feed(xml_bytes: bytes, source_name: str) -> list[Story]:
     """Parse an RSS 2.0 or Atom feed into Story objects using ElementTree."""
     try:
-        root = ET.fromstring(xml_text)
+        root = ET.fromstring(xml_bytes)
     except ET.ParseError as exc:
         raise ValueError(f"Failed to parse RSS feed for {source_name}: {exc}") from exc
 
@@ -476,6 +471,8 @@ async def pick_story(stories: list[Story]) -> Story:
 
 async def _pick_story_tracked(stories: list[Story], run_id: str) -> tuple[Story, bool, str | None]:
     """Returns (chosen_story, fallback_used, provider_name)."""
+    if not stories:
+        raise ValueError("Cannot pick from an empty story list")
     if len(stories) == 1:
         return stories[0], False, None
 
@@ -806,7 +803,7 @@ async def _generate_image_gemini(article: Article, dest_name: str) -> tuple[str,
     final_path = MEDIA_DIR / dest_name
     current_path = MEDIA_DIR / jpeg_name
     if current_path != final_path:
-        current_path.rename(final_path)
+        current_path.replace(final_path)
 
     return dest_name, "gemini_imagen"
 
@@ -816,9 +813,8 @@ async def _generate_image_pollinations(article: Article, dest_name: str) -> tupl
     prompt_encoded = urllib.parse.quote(f"{article.image_prompt}, {_image_style_suffix()}")
     url = f"https://image.pollinations.ai/prompt/{prompt_encoded}?width=1080&height=1080&nologo=true"
 
-    async with httpx.AsyncClient(timeout=60) as client:
-        resp = await client.get(url, follow_redirects=True)
-        resp.raise_for_status()
+    resp = await ai_client().get(url, timeout=60, follow_redirects=True)
+    resp.raise_for_status()
 
     png_path = MEDIA_DIR / f"{uuid.uuid4().hex}.png"
     png_path.write_bytes(resp.content)
@@ -832,7 +828,7 @@ async def _generate_image_pollinations(article: Article, dest_name: str) -> tupl
     final_path = MEDIA_DIR / dest_name
     current_path = MEDIA_DIR / jpeg_name
     if current_path != final_path:
-        current_path.rename(final_path)
+        current_path.replace(final_path)
 
     return dest_name, "pollinations"
 
@@ -1023,22 +1019,19 @@ def _slug_to_hashtag(slug: str) -> str:
 
 
 async def publish_to_instagram(article: Article, image_filename: str, caption: str) -> tuple[str, str]:
-    port = env_value("APP_PORT", default="8102")
-    base = f"http://127.0.0.1:{port}"
+    from .channel_adapters import publish as adapter_publish
+    from .models import PublishRequest
 
-    payload = {
-        "channel": "instagram",
-        "campaign_name": f"AI News — {article.slug}",
-        "text": caption,
-        "local_image_path": image_filename,
-        "alt_text": article.og_description[:1000],
-        "link_url": f"https://tastytechbytes.com/{article.slug}",
-        "dry_run": False,
-    }
-
-    async with httpx.AsyncClient(timeout=120) as client:
-        resp = await client.post(f"{base}/api/publish", json=payload)
-        resp.raise_for_status()
-
-    result = resp.json()
-    return result.get("publish_log_id", ""), result.get("external_id", "")
+    request = PublishRequest(
+        channel="instagram",
+        campaign_name=f"AI News — {article.slug}",
+        text=caption,
+        local_image_path=image_filename,
+        alt_text=article.og_description[:1000],
+        link_url=f"https://tastytechbytes.com/{article.slug}",
+        dry_run=False,
+    )
+    result = await adapter_publish(request)
+    if result.status == "failed":
+        raise RuntimeError(f"Instagram publish failed: {result.error}")
+    return result.publish_log_id, result.external_id

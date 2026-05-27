@@ -311,7 +311,7 @@ def _jwt_expires_at(token: str) -> float:
         exp = payload.get("exp")
         if isinstance(exp, (int, float)):
             return float(exp)
-    except (IndexError, ValueError, TypeError, json.JSONDecodeError):
+    except Exception:
         pass
     return time.time() + 3000
 
