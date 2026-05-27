@@ -23,7 +23,8 @@ def validate_hero_image(path: Path) -> ImageValidation:
     with Image.open(path) as im:
         width, height = im.size
         fmt = im.format or path.suffix.lstrip(".").upper()
-        stat = ImageStat.Stat(im)
+        rgb = im.convert("RGB") if im.mode not in ("RGB", "RGBA", "L") else im
+        stat = ImageStat.Stat(rgb)
         mean_color = list(stat.mean)
         color_stddev = list(stat.stddev)
 

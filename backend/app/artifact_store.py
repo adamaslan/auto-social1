@@ -39,7 +39,13 @@ class LocalArtifactStore:
         self._base = base_dir
 
     def _path(self, run_id: str, name: str) -> Path:
-        return self._base / run_id / name
+        if name not in ALLOWED_ARTIFACT_NAMES:
+            raise ValueError(f"Artifact name not allowed: {name!r}")
+        resolved_base = self._base.resolve()
+        candidate = (self._base / run_id / name).resolve()
+        if not candidate.is_relative_to(resolved_base):
+            raise ValueError(f"Path traversal detected for run_id={run_id!r}")
+        return candidate
 
     def write(self, run_id: str, name: str, data: Any) -> None:
         """Write data as JSON. Best-effort — never raises to the caller."""
@@ -67,8 +73,14 @@ class LocalArtifactStore:
             return None
 
     def run_dir(self, run_id: str) -> Path | None:
-        d = self._base / run_id
-        return d if d.exists() else None
+        try:
+            resolved_base = self._base.resolve()
+            d = (self._base / run_id).resolve()
+            if not d.is_relative_to(resolved_base):
+                return None
+            return d if d.exists() else None
+        except Exception:
+            return None
 
 
 def _serialize(obj: Any) -> Any:
