@@ -41,7 +41,8 @@ def local_path_to_public_jpeg(local_path: str) -> str:
     # If already a JPEG in MEDIA_DIR, upscale-in-place if needed (atomic) and return.
     if src.suffix.lower() in (".jpg", ".jpeg"):
         _ensure_min_dimension_in_place(src)
-        return src.name
+        return src.relative_to(MEDIA_DIR).as_posix()
+
 
     # Convert to JPEG (and upscale if needed)
     dest_name = f"{uuid.uuid4().hex}.jpg"
@@ -66,7 +67,8 @@ def _upscale_if_undersized(img: Image.Image) -> Image.Image:
         return img
     scale = _MIN_DIMENSION / min(w, h)
     new_size = (max(_MIN_DIMENSION, int(round(w * scale))), max(_MIN_DIMENSION, int(round(h * scale))))
-    return img.resize(new_size, Image.LANCZOS)
+    return img.resize(new_size, Image.Resampling.LANCZOS)
+
 
 
 def _ensure_min_dimension_in_place(path: Path) -> None:
