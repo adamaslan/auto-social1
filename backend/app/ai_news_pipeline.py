@@ -774,22 +774,29 @@ async def _generate_image_gemini(article: Article, dest_name: str) -> tuple[str,
 
     url = (
         "https://generativelanguage.googleapis.com/v1beta/models/"
-        "imagen-3.0-fast-generate-001:predict"
+        "gemini-3.1-flash-image:generateContent"
         f"?key={api_key}"
     )
     payload = {
-        "instances": [{"prompt": f"{article.image_prompt}, {_image_style_suffix()}"}],
-        "parameters": {"sampleCount": 1, "aspectRatio": "1:1"},
+        "contents": [
+            {
+                "parts": [
+                    {
+                        "text": f"{article.image_prompt}, {_image_style_suffix()}"
+                    }
+                ]
+            }
+        ]
     }
     response = await ai_client().post(url, json=payload, timeout=60)
     response.raise_for_status()
 
     data = response.json()
     try:
-        b64 = data["predictions"][0]["bytesBase64Encoded"]
+        b64 = data["candidates"][0]["content"]["parts"][0]["inlineData"]["data"]
         image_bytes = base64.b64decode(b64)
     except (KeyError, IndexError, TypeError) as exc:
-        raise ValueError(f"Gemini Imagen API returned an unexpected response format: {data}") from exc
+        raise ValueError(f"Gemini 3.1 Flash Image API returned an unexpected response format: {data}") from exc
 
     png_path = MEDIA_DIR / f"{uuid.uuid4().hex}.png"
     png_path.write_bytes(image_bytes)
@@ -805,7 +812,7 @@ async def _generate_image_gemini(article: Article, dest_name: str) -> tuple[str,
     if current_path != final_path:
         current_path.replace(final_path)
 
-    return dest_name, "gemini_imagen"
+    return dest_name, "gemini_3.1_flash_image"
 
 
 async def _generate_image_pollinations(article: Article, dest_name: str) -> tuple[str, str]:

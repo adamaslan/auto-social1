@@ -46,5 +46,5 @@ Thumbs.db
 *.swp
 *.swo
 
-# Claude local settings (permissions only, not secrets, but no need to track)
-.claude/settings.local.json
+# Claude Code — ignore all local config and commands
+.claude/
