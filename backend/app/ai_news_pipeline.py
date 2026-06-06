@@ -795,8 +795,9 @@ async def _generate_image_gemini(article: Article, dest_name: str) -> tuple[str,
     try:
         b64 = data["candidates"][0]["content"]["parts"][0]["inlineData"]["data"]
         image_bytes = base64.b64decode(b64)
-    except (KeyError, IndexError, TypeError) as exc:
-        raise ValueError(f"Gemini 3.1 Flash Image API returned an unexpected response format: {data}") from exc
+    except (KeyError, IndexError, TypeError, ValueError) as exc:
+        keys = list(data.keys()) if isinstance(data, dict) else type(data).__name__
+        raise ValueError(f"Gemini 3.1 Flash Image API returned an unexpected response format: top-level keys={keys}") from exc
 
     png_path = MEDIA_DIR / f"{uuid.uuid4().hex}.png"
     png_path.write_bytes(image_bytes)
